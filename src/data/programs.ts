@@ -207,10 +207,10 @@ export function buildProgram(p: Profile): Program {
       id: `s${i + 1}`,
       name: b.name,
       focus: b.focus,
-      emoji: b.emoji,
       items,
       weekday: weekdays[i] ?? i,
     };
+    void b.emoji;
     if (p.cardio || p.goal === 'seche') {
       session.cardio = {
         exerciseId: p.goal === 'seche' ? 'tapis-incline' : cardioId,
@@ -220,7 +220,33 @@ export function buildProgram(p: Profile): Program {
     return session;
   });
 
-  return { goal: p.goal, level: p.level, days: p.days, sessions, createdAt: new Date().toISOString() };
+  return newProgram(p, sessions);
+}
+
+export const PROGRAM_NAME: Record<Goal, string> = {
+  seche: 'Sèche',
+  masse: 'Prise de masse',
+  force: 'Force',
+};
+
+let seq = 0;
+
+/** Fabrique un programme complet et actif à partir d'un profil. */
+export function newProgram(p: Profile, sessions: Session[], name?: string): Program {
+  seq += 1;
+  const id = `p${Date.now().toString(36)}${seq}`;
+  return {
+    id,
+    name: name?.trim() || PROGRAM_NAME[p.goal],
+    goal: p.goal,
+    level: p.level,
+    days: p.days,
+    // Les identifiants de séance sont préfixés par le programme : deux
+    // programmes peuvent coexister sans collision.
+    sessions: sessions.map((s, i) => ({ ...s, id: `${id}-s${i + 1}` })),
+    createdAt: new Date().toISOString(),
+    status: 'active',
+  };
 }
 
 export const GOAL_LABEL: Record<Goal, string> = {

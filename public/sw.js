@@ -1,5 +1,5 @@
 /* Service worker minimal : met l'app en cache pour l'utiliser en salle sans réseau. */
-const CACHE = 'ironpath-v1';
+const CACHE = 'gymos-v1';
 const ASSETS = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (e) => {

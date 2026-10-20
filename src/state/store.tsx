@@ -1,31 +1,109 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react';
-import type { AppState, BodyWeightPoint, DoneSet, HistoryEntry, Profile, Program, Session } from '../data/types';
-import { buildProgram } from '../data/programs';
+import type {
+  AppState,
+  BodyWeightPoint,
+  DoneSet,
+  HistoryEntry,
+  PlannedExercise,
+  Profile,
+  Program,
+  Session,
+  Settings,
+} from '../data/types';
+import { buildProgram, newProgram, PROGRAM_NAME } from '../data/programs';
 
-const KEY = 'ironpath.v2';
+const KEY = 'gymos.v1';
+/** Ancienne clé IronPath, migrée automatiquement au premier chargement. */
+const LEGACY_KEY = 'ironpath.v2';
 
-const EMPTY: AppState = { profile: null, program: null, history: [], bodyweights: [], active: null };
+const DEFAULT_SETTINGS: Settings = {
+  units: 'kg',
+  reduceMotion: 'auto',
+  sound: true,
+  vibration: true,
+  defaultRest: 75,
+};
+
+const EMPTY: AppState = {
+  profile: null,
+  programs: [],
+  activeProgramId: null,
+  history: [],
+  bodyweights: [],
+  active: null,
+  settings: DEFAULT_SETTINGS,
+};
+
+/** Ancien format : un seul programme, sans identifiant ni statut. */
+interface LegacyState {
+  profile: Profile | null;
+  program: Omit<Program, 'id' | 'name' | 'status'> | null;
+  history: HistoryEntry[];
+  bodyweights: BodyWeightPoint[];
+  active: AppState['active'];
+}
+
+function migrateLegacy(raw: string): AppState | null {
+  try {
+    const old = JSON.parse(raw) as Partial<LegacyState>;
+    if (!old || typeof old !== 'object') return null;
+    const base: AppState = {
+      ...EMPTY,
+      profile: old.profile ?? null,
+      history: old.history ?? [],
+      bodyweights: old.bodyweights ?? [],
+      active: old.active ?? null,
+    };
+    if (old.program && old.profile && Array.isArray(old.program.sessions)) {
+      const p = newProgram(old.profile, old.program.sessions, `${PROGRAM_NAME[old.program.goal]} (importé)`);
+      base.programs = [p];
+      base.activeProgramId = p.id;
+    }
+    return base;
+  } catch {
+    return null;
+  }
+}
 
 function load(): AppState {
   if (typeof localStorage === 'undefined') return EMPTY;
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return EMPTY;
-    const parsed = JSON.parse(raw) as Partial<AppState>;
-    return { ...EMPTY, ...parsed };
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<AppState>;
+      return {
+        ...EMPTY,
+        ...parsed,
+        programs: Array.isArray(parsed.programs) ? parsed.programs : [],
+        settings: { ...DEFAULT_SETTINGS, ...(parsed.settings ?? {}) },
+      };
+    }
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy) return migrateLegacy(legacy) ?? EMPTY;
+    return EMPTY;
   } catch {
     return EMPTY;
   }
 }
 
 interface Store extends AppState {
+  /** Programme sélectionné (ou le premier par défaut). */
+  currentProgram: Program | null;
   saveProfile: (p: Profile) => void;
   regenerate: () => void;
   reset: () => void;
+  createProgram: (name: string) => void;
+  renameProgram: (id: string, name: string) => void;
+  setProgramStatus: (id: string, status: Program['status']) => void;
+  deleteProgram: (id: string) => void;
+  selectProgram: (id: string) => void;
+  /** Déplace une séance vers un autre jour de la semaine. */
+  moveSession: (programId: string, sessionId: string, weekday: number) => void;
+  replaceSessionItems: (programId: string, sessionId: string, items: PlannedExercise[]) => void;
+  updateSettings: (patch: Partial<Settings>) => void;
   startSession: (sessionId: string) => void;
   updateSet: (exerciseId: string, index: number, patch: Partial<DoneSet>) => void;
   addSet: (exerciseId: string, template: DoneSet) => void;
-  /** Pré-remplit les séries d'une séance à partir du plan et de l'historique. */
   initSets: (items: { exerciseId: string; sets: number; reps: string }[], lastWeight: Record<string, number>) => void;
   removeSet: (exerciseId: string) => void;
   finishSession: (durationSec: number) => HistoryEntry | null;
@@ -48,15 +126,88 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [state]);
 
+  const currentProgram = useMemo(
+    () => state.programs.find((p) => p.id === state.activeProgramId) ?? state.programs[0] ?? null,
+    [state.programs, state.activeProgramId],
+  );
+
   const saveProfile = useCallback((p: Profile) => {
-    setState((s) => ({ ...s, profile: p, program: buildProgram(p), active: null }));
+    setState((s) => {
+      const existing = s.programs;
+      if (existing.length > 0) return { ...s, profile: p };
+      const prog = buildProgram(p);
+      return { ...s, profile: p, programs: [prog], activeProgramId: prog.id };
+    });
   }, []);
 
   const regenerate = useCallback(() => {
-    setState((s) => (s.profile ? { ...s, program: buildProgram(s.profile), active: null } : s));
+    setState((s) => {
+      if (!s.profile) return s;
+      const prog = buildProgram(s.profile);
+      return {
+        ...s,
+        programs: [...s.programs.filter((p) => p.id !== s.activeProgramId), prog],
+        activeProgramId: prog.id,
+        active: null,
+      };
+    });
   }, []);
 
   const reset = useCallback(() => setState(EMPTY), []);
+
+  const createProgram = useCallback((name: string) => {
+    setState((s) => {
+      if (!s.profile) return s;
+      const prog = newProgram(s.profile, buildProgram(s.profile).sessions, name);
+      return { ...s, programs: [...s.programs, prog], activeProgramId: prog.id };
+    });
+  }, []);
+
+  const renameProgram = useCallback((id: string, name: string) => {
+    setState((s) => ({
+      ...s,
+      programs: s.programs.map((p) => (p.id === id ? { ...p, name: name.trim() || p.name } : p)),
+    }));
+  }, []);
+
+  const setProgramStatus = useCallback((id: string, status: Program['status']) => {
+    setState((s) => ({ ...s, programs: s.programs.map((p) => (p.id === id ? { ...p, status } : p)) }));
+  }, []);
+
+  const deleteProgram = useCallback((id: string) => {
+    setState((s) => {
+      const programs = s.programs.filter((p) => p.id !== id);
+      return {
+        ...s,
+        programs,
+        activeProgramId: s.activeProgramId === id ? (programs[0]?.id ?? null) : s.activeProgramId,
+      };
+    });
+  }, []);
+
+  const selectProgram = useCallback((id: string) => setState((s) => ({ ...s, activeProgramId: id })), []);
+
+  const moveSession = useCallback((programId: string, sessionId: string, weekday: number) => {
+    setState((s) => ({
+      ...s,
+      programs: s.programs.map((p) =>
+        p.id === programId ? { ...p, sessions: p.sessions.map((x) => (x.id === sessionId ? { ...x, weekday } : x)) } : p,
+      ),
+    }));
+  }, []);
+
+  const replaceSessionItems = useCallback((programId: string, sessionId: string, items: PlannedExercise[]) => {
+    setState((s) => ({
+      ...s,
+      programs: s.programs.map((p) =>
+        p.id === programId ? { ...p, sessions: p.sessions.map((x) => (x.id === sessionId ? { ...x, items } : x)) } : p,
+      ),
+    }));
+  }, []);
+
+  const updateSettings = useCallback((patch: Partial<Settings>) => {
+    setState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
+  }, []);
 
   const startSession = useCallback((sessionId: string) => {
     setState((s) => ({
@@ -112,11 +263,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const finishSession = useCallback(
     (durationSec: number): HistoryEntry | null => {
       const s = state;
-      if (!s.active || !s.program) return null;
-      const session = s.program.sessions.find((x) => x.id === s.active!.sessionId);
+      if (!s.active) return null;
+      const program = s.programs.find((p) => p.id === s.activeProgramId) ?? s.programs[0];
+      const session = program?.sessions.find((x) => x.id === s.active!.sessionId);
       const exercises = Object.entries(s.active.sets)
         .filter(([, sets]) => sets.some((x) => x.done))
         .map(([exerciseId, sets]) => ({ exerciseId, sets: sets.filter((x) => x.done) }));
+      if (exercises.length === 0) return null;
       const volume = exercises.reduce(
         (acc, e) => acc + e.sets.reduce((a, x) => a + (x.weight > 0 ? x.weight : 10) * x.reps, 0),
         0,
@@ -150,8 +303,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const importState = useCallback((raw: string) => {
     try {
-      const parsed = JSON.parse(raw) as AppState;
-      setState({ ...EMPTY, ...parsed });
+      const parsed = JSON.parse(raw) as Partial<AppState>;
+      if (!parsed || typeof parsed !== 'object') return false;
+      setState({
+        ...EMPTY,
+        ...parsed,
+        programs: Array.isArray(parsed.programs) ? parsed.programs : [],
+        settings: { ...DEFAULT_SETTINGS, ...(parsed.settings ?? {}) },
+      });
       return true;
     } catch {
       return false;
@@ -161,9 +320,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const value = useMemo<Store>(
     () => ({
       ...state,
+      currentProgram,
       saveProfile,
       regenerate,
       reset,
+      createProgram,
+      renameProgram,
+      setProgramStatus,
+      deleteProgram,
+      selectProgram,
+      moveSession,
+      replaceSessionItems,
+      updateSettings,
       startSession,
       updateSet,
       addSet,
@@ -177,9 +345,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }),
     [
       state,
+      currentProgram,
       saveProfile,
       regenerate,
       reset,
+      createProgram,
+      renameProgram,
+      setProgramStatus,
+      deleteProgram,
+      selectProgram,
+      moveSession,
+      replaceSessionItems,
+      updateSettings,
       startSession,
       updateSet,
       addSet,
@@ -220,14 +397,17 @@ export function daysBetween(a: string, b: string): number {
   return Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
 }
 
-export function findSessionForToday(program: Program | null, date = new Date()): { session: Session | null; index: number } {
+export function findSessionForToday(
+  program: Program | null,
+  date = new Date(),
+): { session: Session | null; index: number } {
   if (!program) return { session: null, index: -1 };
   const wd = weekdayIndex(date);
   const idx = program.sessions.findIndex((s) => s.weekday === wd);
   if (idx >= 0) return { session: program.sessions[idx], index: idx };
   // jour de repos : on propose la prochaine séance
   const next = program.sessions.find((s) => s.weekday > wd) ?? program.sessions[0];
-  return { session: next, index: program.sessions.indexOf(next) };
+  return { session: next ?? null, index: next ? program.sessions.indexOf(next) : -1 };
 }
 
 export function streakOf(history: HistoryEntry[]): number {
@@ -259,7 +439,9 @@ export function lastWeights(history: HistoryEntry[]): Record<string, number> {
   return out;
 }
 
-export function personalRecords(history: HistoryEntry[]): Record<string, { weight: number; reps: number; date: string }> {
+export function personalRecords(
+  history: HistoryEntry[],
+): Record<string, { weight: number; reps: number; date: string }> {
   const pr: Record<string, { weight: number; reps: number; date: string }> = {};
   for (const h of history) {
     for (const e of h.exercises) {

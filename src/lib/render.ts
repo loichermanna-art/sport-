@@ -171,6 +171,19 @@ export const IRON_STYLE: FigureStyle = {
   shadow: 'rgba(4,8,18,0.45)',
 };
 
+/** Variante claire : silhouette sombre sur fond clair, accent bleu. */
+export const GYM_STYLE: FigureStyle = {
+  near: '#1e293b',
+  far: '#9aa7b8',
+  head: '#334155',
+  outline: '#0f172a',
+  gear: '#64748b',
+  gearDark: '#334155',
+  glow: '#2563eb',
+  glowSoft: 'rgba(37,99,235,0.28)',
+  shadow: 'rgba(15,23,42,0.12)',
+};
+
 /* ------------------------------------------------------------------ */
 /* Équipement                                                          */
 /* ------------------------------------------------------------------ */

@@ -1,101 +1,154 @@
 import { useMemo, useState } from 'react';
-import { EXERCISES, EQUIPMENT_LABEL, type Equipment, type Exercise } from '../data/exercises';
-import { MUSCLE_GROUP, MUSCLE_LABEL, type MuscleId } from '../lib/render';
-import { ExerciseDetail } from '../components/ExerciseDetail';
-import { FigureThumb } from '../components/Figure';
+import { EXERCISES, EQUIPMENT_LABEL } from '../data/exercises';
+import { MUSCLE_LABEL, MUSCLE_GROUP } from '../lib/render';
+import type { Equipment, Exercise } from '../data/exercises';
 
-const GROUPS = ['Tous', 'Jambes', 'Pectoraux', 'Dos', 'Épaules', 'Bras', 'Abdos', 'Cardio'];
-const EQUIPS: (Equipment | 'all')[] = ['all', 'machine', 'dumbbell', 'barbell', 'cable', 'bodyweight', 'kettlebell', 'cardio'];
-
+/** Regroupement lisible dérivé du muscle principal de l'exercice. */
 function groupOf(e: Exercise): string {
-  if (e.equip === 'cardio') return 'Cardio';
-  return MUSCLE_GROUP[e.muscles[0]];
+  return MUSCLE_GROUP[e.muscles[0]] ?? 'Autre';
 }
+import { FigureThumb } from '../components/Figure';
+import { ExerciseDetail } from '../components/ExerciseDetail';
+import { Icon } from '../components/Icon';
+
+const GROUPS = ['Jambes', 'Pectoraux', 'Dos', 'Épaules', 'Bras', 'Abdominaux', 'Cardio'] as const;
 
 export function Library() {
-  const [group, setGroup] = useState('Tous');
+  const [query, setQuery] = useState('');
+  const [group, setGroup] = useState<string>('Tous');
   const [equip, setEquip] = useState<Equipment | 'all'>('all');
-  const [q, setQ] = useState('');
-  const [open, setOpen] = useState<Exercise | null>(null);
+  const [detail, setDetail] = useState<Exercise | null>(null);
   const [hover, setHover] = useState<string | null>(null);
 
-  const list = useMemo(() => {
-    const needle = q.trim().toLowerCase();
+  const equipment = useMemo(() => {
+    const set = new Set<Equipment>();
+    for (const e of EXERCISES) set.add(e.equip);
+    return Array.from(set).sort((a, b) => EQUIPMENT_LABEL[a].localeCompare(EQUIPMENT_LABEL[b], 'fr'));
+  }, []);
+
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
     return EXERCISES.filter((e) => {
-      if (group !== 'Tous' && groupOf(e) !== group) return false;
+      // « Cardio » n'est pas un groupe musculaire : on filtre sur le matériel.
+      if (group === 'Cardio' ? e.equip !== 'cardio' : group !== 'Tous' && groupOf(e) !== group) return false;
       if (equip !== 'all' && e.equip !== equip) return false;
-      if (!needle) return true;
+      if (!q) return true;
       return (
-        e.name.toLowerCase().includes(needle) ||
-        (e.aka ?? '').toLowerCase().includes(needle) ||
-        e.muscles.some((m) => MUSCLE_LABEL[m as MuscleId].toLowerCase().includes(needle))
+        e.name.toLowerCase().includes(q) ||
+        (e.aka ?? '').toLowerCase().includes(q) ||
+        e.muscles.some((m) => MUSCLE_LABEL[m].toLowerCase().includes(q))
       );
     });
-  }, [group, equip, q]);
+  }, [query, group, equip]);
 
   return (
-    <div>
+    <div className="container">
       <div className="pagehead">
         <div>
           <div className="eyebrow">Bibliothèque</div>
-          <h1>{EXERCISES.length} exercices expliqués</h1>
-          <p>Animation du mouvement, muscles sollicités, consignes et erreurs à éviter.</p>
+          <h1>Exercices</h1>
+          <p>{EXERCISES.length} exercices avec démonstration animée.</p>
         </div>
-        <input
-          className="setinput"
-          style={{ minWidth: 200, textAlign: 'left' }}
-          placeholder="🔍 Rechercher…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
       </div>
 
-      <div className="row row--wrap" style={{ gap: 8, marginBottom: 8 }}>
-        {GROUPS.map((g) => (
-          <button key={g} className={`chip ${group === g ? 'chip--on' : ''}`} onClick={() => setGroup(g)}>
-            {g}
-          </button>
-        ))}
-      </div>
-      <div className="row row--wrap" style={{ gap: 8, marginBottom: 16 }}>
-        {EQUIPS.map((e) => (
-          <button key={e} className={`chip chip--sm ${equip === e ? 'chip--on' : ''}`} onClick={() => setEquip(e)}>
-            {e === 'all' ? 'Tout l’équipement' : EQUIPMENT_LABEL[e]}
-          </button>
-        ))}
-      </div>
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div className="row row--wrap" style={{ gap: 10 }}>
+          <div className="search">
+            <span className="search__ico">
+              <Icon name="search" size={17} />
+            </span>
+            <input
+              className="input"
+              type="search"
+              value={query}
+              placeholder="Rechercher un exercice ou un muscle"
+              aria-label="Rechercher un exercice"
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+        </div>
 
-      {list.length === 0 ? (
-        <div className="card empty">Aucun exercice ne correspond à cette recherche.</div>
-      ) : (
-        <div className="grid grid--3">
-          {list.map((e) => (
+        <div className="divider" />
+
+        <div className="chiprow" role="group" aria-label="Filtrer par groupe musculaire">
+          {['Tous', ...GROUPS].map((g) => (
             <button
-              key={e.id}
-              className="card"
-              style={{ padding: 0, overflow: 'hidden', textAlign: 'left' }}
-              onClick={() => setOpen(e)}
-              onMouseEnter={() => setHover(e.id)}
-              onMouseLeave={() => setHover(null)}
+              key={g}
+              className={`chip ${group === g ? 'chip--on' : ''}`}
+              onClick={() => setGroup(g)}
+              aria-pressed={group === g}
             >
-              <div style={{ height: 150, background: 'var(--bg-2)', borderBottom: '1px solid var(--border)' }}>
-                <FigureThumb exercise={e} active={hover === e.id} />
-              </div>
-              <div style={{ padding: '11px 13px 13px' }}>
-                <div className="row row--between">
-                  <strong style={{ fontSize: 14.5 }}>{e.name}</strong>
-                  <span className="pill">{EQUIPMENT_LABEL[e.equip]}</span>
-                </div>
-                <div className="tiny muted mt8">
-                  {e.muscles.map((m) => MUSCLE_LABEL[m]).join(' · ')}
-                </div>
-              </div>
+              {g}
             </button>
           ))}
         </div>
+
+        <div className="chiprow mt8" role="group" aria-label="Filtrer par matériel">
+          <button
+            className={`chip chip--sm ${equip === 'all' ? 'chip--on' : ''}`}
+            onClick={() => setEquip('all')}
+            aria-pressed={equip === 'all'}
+          >
+            Tout matériel
+          </button>
+          {equipment.map((eq) => (
+            <button
+              key={eq}
+              className={`chip chip--sm ${equip === eq ? 'chip--on' : ''}`}
+              onClick={() => setEquip(eq)}
+              aria-pressed={equip === eq}
+            >
+              {EQUIPMENT_LABEL[eq]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {results.length === 0 ? (
+        <div className="empty">
+          <div className="empty__title">Aucun exercice ne correspond</div>
+          <p className="empty__text">
+            Essaie un autre mot-clé, ou élargis les filtres de groupe et de matériel.
+          </p>
+        </div>
+      ) : (
+        <>
+          <p className="tiny muted-2" style={{ marginBottom: 10 }}>
+            {results.length} exercice{results.length > 1 ? 's' : ''}
+          </p>
+          <div className="grid grid--3">
+            {results.map((e) => (
+              <button
+                key={e.id}
+                className="exorow"
+                style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10, padding: 10 }}
+                onClick={() => setDetail(e)}
+                onMouseEnter={() => setHover(e.id)}
+                onMouseLeave={() => setHover((h) => (h === e.id ? null : h))}
+                onFocus={() => setHover(e.id)}
+                onBlur={() => setHover((h) => (h === e.id ? null : h))}
+              >
+                <FigureThumb exercise={e} active={hover === e.id} />
+                <span style={{ textAlign: 'left' }}>
+                  <span className="exorow__name">{e.name}</span>
+                  <span className="exorow__meta">
+                    {e.muscles
+                      .slice(0, 2)
+                      .map((m) => MUSCLE_LABEL[m])
+                      .join(' · ')}
+                  </span>
+                  <span className="row row--wrap mt8" style={{ gap: 4 }}>
+                    <span className="pill">{EQUIPMENT_LABEL[e.equip]}</span>
+                    <span className="pill">Niveau {e.level}/3</span>
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
       )}
 
-      {open ? <ExerciseDetail exercise={open} onClose={() => setOpen(null)} /> : null}
+      {detail ? <ExerciseDetail exercise={detail} onClose={() => setDetail(null)} /> : null}
     </div>
   );
 }

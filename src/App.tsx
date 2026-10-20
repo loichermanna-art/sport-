@@ -1,109 +1,157 @@
 import { useEffect, useState } from 'react';
-import { useStore, findSessionForToday, weekdayIndex } from './state/store';
+import { useStore, findSessionForToday } from './state/store';
 import { Onboarding } from './views/Onboarding';
-import { Today } from './views/Today';
+import { Dashboard } from './views/Dashboard';
+import { Programs } from './views/Programs';
 import { Library } from './views/Library';
-import { Plan } from './views/Plan';
-import { Stats } from './views/Stats';
-import type { Profile } from './data/types';
+import { Progress } from './views/Progress';
+import { Settings } from './views/Settings';
+import { Session } from './views/Session';
+import { Icon, type IconName } from './components/Icon';
 import { GOAL_SHORT } from './data/programs';
+import type { Profile } from './data/types';
 
-type Tab = 'today' | 'plan' | 'library' | 'stats';
+type Tab = 'dashboard' | 'programs' | 'library' | 'progress' | 'settings';
 
-const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'today', label: 'Aujourd’hui', icon: '🎯' },
-  { id: 'plan', label: 'Planning', icon: '🗓' },
-  { id: 'library', label: 'Exercices', icon: '🎬' },
-  { id: 'stats', label: 'Suivi', icon: '📈' },
+const TABS: { id: Tab; label: string; icon: IconName }[] = [
+  { id: 'dashboard', label: 'Tableau de bord', icon: 'dashboard' },
+  { id: 'programs', label: 'Programmes', icon: 'programs' },
+  { id: 'library', label: 'Bibliothèque', icon: 'library' },
+  { id: 'progress', label: 'Suivi', icon: 'progress' },
+  { id: 'settings', label: 'Paramètres', icon: 'settings' },
 ];
 
 export default function App() {
-  const { profile, program, saveProfile, active } = useStore();
-  const [tab, setTab] = useState<Tab>('today');
+  const { profile, currentProgram, active, saveProfile, startSession } = useStore();
+  const [tab, setTab] = useState<Tab>('dashboard');
   const [editing, setEditing] = useState(false);
+  const [inSession, setInSession] = useState(false);
 
-  // Raccourcis clavier : 1-4 pour changer d'onglet
+  // Raccourcis clavier : 1 à 5 pour changer de section.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
-      const idx = ['1', '2', '3', '4'].indexOf(e.key);
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const idx = ['1', '2', '3', '4', '5'].indexOf(e.key);
       if (idx >= 0) setTab(TABS[idx].id);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  if (!profile || !program || editing) {
+  // Une séance reprise au reload renvoie directement sur l'écran de séance.
+  useEffect(() => {
+    if (active) setInSession(true);
+  }, [active]);
+
+  if (!profile || !currentProgram || editing) {
     return (
       <Onboarding
         initial={profile}
         onDone={(p: Profile) => {
           saveProfile(p);
           setEditing(false);
-          setTab('today');
+          setTab('dashboard');
         }}
       />
     );
   }
 
-  const { session } = findSessionForToday(program);
-  const isRestDay = !program.sessions.some((s) => s.weekday === weekdayIndex());
-  const remaining = active ? 1 : isRestDay || !session ? 0 : session.items.length;
+  /* L'écran de séance est volontairement sans navigation : on reste concentré. */
+  if (inSession && active) {
+    return (
+      <div className="app">
+        <main className="main" style={{ padding: 0 }}>
+          <Session
+            onExit={() => {
+              setInSession(false);
+              setTab('dashboard');
+            }}
+          />
+        </main>
+      </div>
+    );
+  }
+
+  const { session } = findSessionForToday(currentProgram);
+
+  function start() {
+    if (!session) {
+      setTab('programs');
+      return;
+    }
+    startSession(session.id);
+    setInSession(true);
+  }
 
   return (
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand__mark">🏋️</div>
-          <div>
-            <div className="brand__name">IronPath</div>
-            <div className="brand__sub">{GOAL_SHORT[profile.goal]} · Niveau {profile.level}</div>
-          </div>
+          <span className="brand__mark">
+            <Icon name="library" size={18} />
+          </span>
+          <span>
+            <span className="brand__name">GYM OS</span>
+            <span className="brand__sub">Musculation guidée</span>
+          </span>
         </div>
 
-        <nav className="nav">
+        <nav className="nav" aria-label="Navigation principale">
+          <div className="nav__label">Menu</div>
           {TABS.map((t) => (
-            <button key={t.id} className={`nav__item ${tab === t.id ? 'nav__item--on' : ''}`} onClick={() => setTab(t.id)}>
-              <span className="nav__ico">{t.icon}</span>
+            <button
+              key={t.id}
+              className={`nav__item ${tab === t.id ? 'nav__item--on' : ''}`}
+              onClick={() => setTab(t.id)}
+              aria-current={tab === t.id ? 'page' : undefined}
+            >
+              <span className="nav__ico">
+                <Icon name={t.icon} size={19} />
+              </span>
               <span>{t.label}</span>
-              {t.id === 'today' && remaining > 0 ? <span className="nav__badge">{remaining}</span> : null}
+              {t.id === 'dashboard' && active ? <span className="nav__badge">1</span> : null}
             </button>
           ))}
         </nav>
 
-        <div style={{ marginTop: 'auto', display: 'grid', gap: 10 }}>
-          <div className="card" style={{ padding: 13 }}>
-            <div className="tiny muted">Profil</div>
-            <strong style={{ fontSize: 14 }}>{profile.name}</strong>
+        <div className="sidebar__foot">
+          <div className="card" style={{ padding: 12 }}>
+            <div className="tiny muted-2">Profil</div>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>{profile.name}</div>
             <div className="tiny muted">
-              {profile.weight} kg · {profile.days} séances/semaine
+              {profile.weight} kg · {GOAL_SHORT[profile.goal]} · {profile.days} séances/semaine
             </div>
-            <button className="chip chip--sm mt8" onClick={() => setEditing(true)}>
-              Modifier l’objectif
+            <button className="btn btn--sm btn--block mt8" onClick={() => setEditing(true)}>
+              Modifier le profil
             </button>
           </div>
-          <p className="tiny muted" style={{ padding: '0 6px' }}>
-            Astuce : touches <strong>1</strong> à <strong>4</strong> pour naviguer.
+          <p className="tiny muted-2" style={{ padding: '0 6px' }}>
+            Touches <strong>1</strong> à <strong>5</strong> pour naviguer.
           </p>
         </div>
       </aside>
 
       <main className="main">
-        {tab === 'today' ? <Today /> : null}
-        {tab === 'plan' ? <Plan /> : null}
+        {tab === 'dashboard' ? <Dashboard onStart={start} /> : null}
+        {tab === 'programs' ? <Programs /> : null}
         {tab === 'library' ? <Library /> : null}
-        {tab === 'stats' ? <Stats /> : null}
+        {tab === 'progress' ? <Progress /> : null}
+        {tab === 'settings' ? <Settings /> : null}
       </main>
 
-      <nav className="mobilebar">
+      <nav className="mobilebar" aria-label="Navigation principale">
         {TABS.map((t) => (
           <button
             key={t.id}
             className={`mobilebar__item ${tab === t.id ? 'mobilebar__item--on' : ''}`}
             onClick={() => setTab(t.id)}
+            aria-current={tab === t.id ? 'page' : undefined}
           >
-            <span className="mobilebar__ico">{t.icon}</span>
-            <span>{t.label}</span>
+            <span className="mobilebar__ico">
+              <Icon name={t.icon} size={21} />
+            </span>
+            <span>{t.label.split(' ')[0]}</span>
           </button>
         ))}
       </nav>

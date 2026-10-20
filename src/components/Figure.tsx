@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { sampleTimeline, type Pose } from '../lib/pose';
-import { renderFigure, IRON_STYLE, type Shape, type MuscleId } from '../lib/render';
+import { renderFigure, GYM_STYLE, type Shape } from '../lib/render';
 import type { Exercise } from '../data/exercises';
+import { useReducedMotion } from '../hooks/useMotion';
+import { Icon } from './Icon';
 
 /** La scène est exprimée directement en unités « corps » : torse = 1. */
 const VB = { w: 4.6, h: 4.1, ox: 2.3, oy: 3.68 };
@@ -37,38 +39,40 @@ function ShapeEl({ s }: { s: Shape }) {
   }
 }
 
-export interface FigureProps {
+function Frame({
+  exercise,
+  pose,
+  showMuscles,
+  className,
+  title,
+}: {
   exercise: Exercise;
-  /** Position dans le cycle, de 0 à 1. */
-  t: number;
-  highlight?: MuscleId[];
-  showMuscles?: boolean;
+  pose: Pose;
+  showMuscles: boolean;
   className?: string;
-  style?: CSSProperties;
-}
-
-export function Figure({ exercise, t, highlight, showMuscles = true, className, style }: FigureProps) {
-  const shapes = useMemo(() => {
-    const pose = sampleTimeline(exercise.frames, t, true);
-    return renderFigure({
-      pose,
-      view: exercise.view,
-      gear: exercise.gear,
-      highlight: showMuscles ? (highlight ?? exercise.muscles) : [],
-      style: IRON_STYLE,
-      pulse: 1,
-      floor: exercise.ground !== false,
-    });
-  }, [exercise, t, highlight, showMuscles]);
+  title?: string;
+}) {
+  const shapes = useMemo(
+    () =>
+      renderFigure({
+        pose,
+        view: exercise.view,
+        gear: exercise.gear,
+        highlight: showMuscles ? exercise.muscles : [],
+        style: GYM_STYLE,
+        pulse: 1,
+        floor: exercise.ground !== false,
+      }),
+    [exercise, pose, showMuscles],
+  );
 
   return (
     <svg
       className={className}
-      style={style}
       viewBox={`0 0 ${VB.w} ${VB.h}`}
       preserveAspectRatio="xMidYMid meet"
       role="img"
-      aria-label={`Démonstration animée : ${exercise.name}`}
+      aria-label={title ?? `Démonstration : ${exercise.name}`}
     >
       <g transform={`translate(${VB.ox} ${VB.oy}) scale(1 -1)`}>
         {shapes.map((s, i) => (
@@ -76,6 +80,63 @@ export function Figure({ exercise, t, highlight, showMuscles = true, className, 
         ))}
       </g>
     </svg>
+  );
+}
+
+/** Figure à une posture donnée. */
+export function PoseFigure({
+  exercise,
+  pose,
+  showMuscles = true,
+  className,
+}: {
+  exercise: Exercise;
+  pose: Pose;
+  showMuscles?: boolean;
+  className?: string;
+}) {
+  return <Frame exercise={exercise} pose={pose} showMuscles={showMuscles} className={className} />;
+}
+
+/** Figure à une position du cycle, de 0 à 1. */
+export function Figure({
+  exercise,
+  t,
+  showMuscles = true,
+  className,
+}: {
+  exercise: Exercise;
+  t: number;
+  showMuscles?: boolean;
+  className?: string;
+}) {
+  const pose = useMemo(() => sampleTimeline(exercise.frames, t, true), [exercise.frames, t]);
+  return <Frame exercise={exercise} pose={pose} showMuscles={showMuscles} className={className} />;
+}
+
+/**
+ * Planche de postures clés : alternative statique à l'animation,
+ * utilisée quand l'utilisateur préfère réduire les animations.
+ */
+export function Storyboard({ exercise, showMuscles = true }: { exercise: Exercise; showMuscles?: boolean }) {
+  const cells = useMemo(() => {
+    const n = exercise.frames.length;
+    const count = Math.min(4, Math.max(2, n));
+    return Array.from({ length: count }, (_, i) => {
+      const idx = Math.round((i * (n - 1)) / (count - 1));
+      return { pose: exercise.frames[idx], cue: exercise.frames[idx]?.cue, key: i };
+    });
+  }, [exercise]);
+
+  return (
+    <div className="storyboard">
+      {cells.map((c) => (
+        <div className="storyboard__cell" key={c.key}>
+          <PoseFigure exercise={exercise} pose={c.pose} showMuscles={showMuscles} />
+          {c.cue ? <div className="storyboard__cap">{c.cue}</div> : null}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -92,7 +153,6 @@ export interface AnimatedFigureProps {
   showMuscles?: boolean;
   className?: string;
   style?: CSSProperties;
-  onCue?: (cue: string) => void;
 }
 
 export function AnimatedFigure({
@@ -101,22 +161,27 @@ export function AnimatedFigure({
   autoPlay = true,
   showControls = true,
   showMuscles = true,
-  className,
-  style,
-  onCue,
 }: AnimatedFigureProps) {
-  const [playing, setPlaying] = useState(autoPlay);
+  const reduced = useReducedMotion();
+  const [animated, setAnimated] = useState(!reduced);
+  const [playing, setPlaying] = useState(autoPlay && !reduced);
   const [t, setT] = useState(0);
   const raf = useRef<number | null>(null);
   const last = useRef<number>(0);
   const duration = exercise.tempo;
+
+  // Si le réglage système change en cours de session, on s'y conforme.
+  useEffect(() => {
+    setAnimated(!reduced);
+    setPlaying(autoPlay && !reduced);
+  }, [reduced, autoPlay]);
 
   useEffect(() => {
     setT(0);
   }, [exercise.id]);
 
   useEffect(() => {
-    if (!playing) return;
+    if (!playing || !animated) return;
     last.current = performance.now();
     const tick = (now: number) => {
       const dt = Math.min(0.1, (now - last.current) / 1000);
@@ -128,14 +193,7 @@ export function AnimatedFigure({
     return () => {
       if (raf.current) cancelAnimationFrame(raf.current);
     };
-  }, [playing, speed, duration]);
-
-  // respiration de la mise en évidence musculaire : léger pulsement
-  const [pulsePhase, setPulsePhase] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setPulsePhase((p) => (p + 1) % 100), 60);
-    return () => clearInterval(id);
-  }, []);
+  }, [playing, animated, speed, duration]);
 
   const cue = useMemo(() => {
     const frames = exercise.frames;
@@ -145,27 +203,43 @@ export function AnimatedFigure({
     return frames[Math.min(frames.length - 1, Math.max(0, idx))]?.cue;
   }, [t, exercise.frames]);
 
-  useEffect(() => {
-    if (onCue && cue) onCue(cue);
-  }, [cue, onCue]);
+  const pose = useMemo(() => sampleTimeline(exercise.frames, t, true), [exercise.frames, t]);
+
+  if (!animated) {
+    return (
+      <div className="player">
+        <div className="player__stage">
+          <Storyboard exercise={exercise} showMuscles={showMuscles} />
+        </div>
+        {showControls ? (
+          <div className="row row--between">
+            <span className="tiny muted">
+              Animations réduites — les postures clés sont affichées à la place.
+            </span>
+            <button className="btn btn--sm" onClick={() => setAnimated(true)}>
+              <Icon name="play" size={15} />
+              Lire l’animation
+            </button>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="player">
       <div className="player__stage">
-        <Figure
-          exercise={exercise}
-          t={t}
-          showMuscles={showMuscles}
-          className={className}
-          style={style}
-          highlight={pulsePhase >= 0 ? exercise.muscles : exercise.muscles}
-        />
+        <Frame exercise={exercise} pose={pose} showMuscles={showMuscles} />
         {cue ? <div className="player__cue">{cue}</div> : null}
       </div>
       {showControls ? (
         <div className="player__controls">
-          <button className="iconbtn" onClick={() => setPlaying((p) => !p)} aria-label={playing ? 'Pause' : 'Lecture'}>
-            {playing ? '⏸' : '▶'}
+          <button
+            className="btn btn--icon"
+            onClick={() => setPlaying((p) => !p)}
+            aria-label={playing ? 'Mettre en pause' : 'Lancer l’animation'}
+          >
+            <Icon name={playing ? 'pause' : 'play'} size={18} />
           </button>
           <input
             className="player__scrub"
@@ -179,20 +253,27 @@ export function AnimatedFigure({
             }}
             aria-label="Position dans le mouvement"
           />
-          <button className="chip chip--sm" onClick={() => setT(0)} title="Revenir au départ">
-            ↺
+          <button className="btn btn--icon" onClick={() => setT(0)} aria-label="Revenir au départ">
+            <Icon name="replay" size={17} />
           </button>
         </div>
+      ) : null}
+      {showControls && reduced ? (
+        <button className="btn btn--sm" onClick={() => setAnimated(false)}>
+          Réduire les animations
+        </button>
       ) : null}
     </div>
   );
 }
 
-/** Vignette animée (listes, grilles) : lecture au survol pour économiser le CPU. */
+/** Vignette : animée au survol, statique au repos. Respecte le réglage d'animation. */
 export function FigureThumb({ exercise, active }: { exercise: Exercise; active: boolean }) {
-  const [t, setT] = useState(0);
+  const reduced = useReducedMotion();
+  const [t, setT] = useState(0.5);
+
   useEffect(() => {
-    if (!active) return;
+    if (!active || reduced) return;
     let raf = 0;
     let last = performance.now();
     const tick = (now: number) => {
@@ -203,8 +284,9 @@ export function FigureThumb({ exercise, active }: { exercise: Exercise; active: 
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [active, exercise.tempo]);
-  return <Figure exercise={exercise} t={active ? t : 0.5} showMuscles={false} className="thumb__svg" />;
+  }, [active, reduced, exercise.tempo]);
+
+  return <Figure exercise={exercise} t={active && !reduced ? t : 0.5} showMuscles={false} className="thumb__svg" />;
 }
 
 export type { Pose };

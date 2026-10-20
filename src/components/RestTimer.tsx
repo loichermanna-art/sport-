@@ -1,64 +1,95 @@
-import { useEffect, useRef, useState } from 'react';
-import { beepRestOver, tick } from '../lib/audio';
+import { useEffect, useState } from 'react';
+import { Icon } from './Icon';
+import { beepRestOver } from '../lib/audio';
 
-export function RestTimer({ seconds, label, onClose, onDone }: { seconds: number; label?: string; onClose: () => void; onDone?: () => void }) {
+/**
+ * Chronomètre de repos en bandeau discret : n'interrompt jamais la séance.
+ * Le compte à rebours reste annoncé aux lecteurs d'écran.
+ */
+export function RestTimer({
+  seconds,
+  label,
+  onClose,
+  reducedMotion = false,
+}: {
+  seconds: number;
+  label: string;
+  onClose: () => void;
+  reducedMotion?: boolean;
+}) {
   const [left, setLeft] = useState(seconds);
-  const end = useRef(Date.now() + seconds * 1000);
-  const doneRef = useRef(false);
+  const total = seconds;
 
   useEffect(() => {
-    end.current = Date.now() + seconds * 1000;
     setLeft(seconds);
-    doneRef.current = false;
   }, [seconds]);
 
   useEffect(() => {
-    const id = setInterval(() => {
-      const remain = Math.max(0, Math.round((end.current - Date.now()) / 1000));
-      setLeft(remain);
-      if (remain <= 3 && remain > 0) tick();
-      if (remain === 0 && !doneRef.current) {
-        doneRef.current = true;
-        beepRestOver();
-        onDone?.();
-      }
-    }, 250);
+    if (left <= 0) {
+      beepRestOver();
+      return;
+    }
+    const id = setInterval(() => setLeft((s) => Math.max(0, s - 1)), 1000);
     return () => clearInterval(id);
-  }, [seconds, onDone]);
+  }, [left]);
 
-  const total = seconds || 1;
-  const pct = 1 - left / total;
-  const R = 18;
+  const pct = total > 0 ? 1 - left / total : 0;
+  const R = 20;
   const C = 2 * Math.PI * R;
 
   return (
-    <div className="timer" role="status" aria-live="polite">
-      <div className="timer__ring">
-        <svg width="42" height="42" viewBox="0 0 42 42">
-          <circle cx="21" cy="21" r={R} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="4" />
+    <div className="restbar" role="region" aria-label="Chronomètre de repos">
+      <div className="restbar__inner">
+        <svg
+          className="restbar__ring"
+          width="46"
+          height="46"
+          viewBox="0 0 46 46"
+          aria-hidden="true"
+          style={reducedMotion ? undefined : undefined}
+        >
+          <circle cx="23" cy="23" r={R} fill="none" stroke="var(--surface-3)" strokeWidth="4" />
           <circle
-            cx="21"
-            cy="21"
+            cx="23"
+            cy="23"
             r={R}
             fill="none"
-            stroke="var(--accent)"
+            stroke={left === 0 ? 'var(--success)' : 'var(--accent)'}
             strokeWidth="4"
             strokeLinecap="round"
             strokeDasharray={C}
             strokeDashoffset={C * (1 - pct)}
+            transform="rotate(-90 23 23)"
           />
+          {left === 0 ? (
+            <path
+              d="M16 23.5l4.5 4.5L30 19"
+              fill="none"
+              stroke="var(--success)"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          ) : null}
         </svg>
-        <div className="timer__num">{left}s</div>
+
+        <div style={{ minWidth: 0 }}>
+          <div className="restbar__label">{label}</div>
+          <div className="restbar__time" aria-live="polite">
+            {left > 0 ? `${left} s` : 'Repos terminé'}
+          </div>
+        </div>
+
+        <div className="restbar__actions">
+          <button className="btn btn--sm" onClick={() => setLeft((s) => s + 15)}>
+            +15 s
+          </button>
+          <button className="btn btn--sm btn--ghost" onClick={onClose}>
+            <Icon name="close" size={16} />
+            Fermer
+          </button>
+        </div>
       </div>
-      <div className="timer__label">
-        {left > 0 ? (label ?? 'Repos') : 'Repos terminé — à toi !'}
-      </div>
-      <button className="chip" onClick={() => setLeft((l) => Math.min(seconds, l + 15))}>
-        +15 s
-      </button>
-      <button className="iconbtn" onClick={onClose} aria-label="Fermer le minuteur">
-        ✕
-      </button>
     </div>
   );
 }

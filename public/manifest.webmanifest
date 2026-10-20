@@ -1,11 +1,11 @@
 {
-  "name": "IronPath — Musculation guidée",
-  "short_name": "IronPath",
+  "name": "GYM OS — Musculation guidée",
+  "short_name": "GYM OS",
   "description": "Planifie tes séances de musculation et apprends chaque mouvement avec des démonstrations animées.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#080b13",
-  "theme_color": "#080b13",
+  "background_color": "#fbfcfd",
+  "theme_color": "#fbfcfd",
   "orientation": "portrait",
   "lang": "fr",
   "icons": [
