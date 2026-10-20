@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import type { Goal, Level, Profile } from '../data/types';
+import type { Goal, Level, Profile, Program } from '../data/types';
 import { GOAL_LABEL, LEVEL_LABEL, sessionDuration, buildProgram } from '../data/programs';
-import { todayISO } from '../state/store';
+import { todayISO, findSessionForToday } from '../state/store';
 import { AnimatedFigure } from '../components/Figure';
 import { getExercise } from '../data/exercises';
 
@@ -18,7 +18,17 @@ export function Onboarding({ onDone, initial }: { onDone: (p: Profile) => void; 
   const [sex, setSex] = useState<Profile['sex']>(initial?.sex ?? 'x');
   const [cardio, setCardio] = useState(initial?.cardio ?? true);
 
-  const preview = buildProgram({ name, goal, level, days, weight: Number(weight) || 70, age: Number(age) || 25, sex, startDate: todayISO(), cardio });
+  const preview: Program = buildProgram({
+    name,
+    goal,
+    level,
+    days,
+    weight: Number(weight) || 70,
+    age: Number(age) || 25,
+    sex,
+    startDate: todayISO(),
+    cardio,
+  });
   const hero = getExercise(goal === 'force' ? 'souleve-de-terre' : goal === 'masse' ? 'dev-couche' : 'squat-barre');
 
   function finish() {
@@ -114,6 +124,16 @@ export function Onboarding({ onDone, initial }: { onDone: (p: Profile) => void; 
             <p className="tiny muted mt14">
               {days <= 3 ? 'Full body' : days === 4 ? 'Upper / Lower' : days === 5 ? 'Push · Pull · Legs · Upper · Lower' : 'Push / Pull / Legs × 2'} —{' '}
               {preview.sessions.map((s) => `${s.emoji} ${sessionDuration(s)} min`).join(' · ')}
+              {preview.sessions.length ? (
+                <>
+                  <br />
+                  Aujourd'hui :{' '}
+                  <b>
+                    {preview.sessions[findSessionForToday(preview).index].emoji}{' '}
+                    {preview.sessions[findSessionForToday(preview).index].name}
+                  </b>
+                </>
+              ) : null}
             </p>
           </>
         ) : null}
