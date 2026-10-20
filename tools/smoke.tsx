@@ -2,8 +2,8 @@
  * Test de fumée : rend l'application côté serveur pour vérifier qu'aucun
  * composant ne lève d'erreur à l'exécution (données vides puis profil complet).
  *
- *   npx esbuild tools/smoke.tsx --bundle --platform=node --format=esm --outfile=/tmp/smoke.mjs
- *   node /tmp/smoke.mjs
+ *   npx esbuild tools/smoke.tsx --bundle --platform=node --format=cjs --outfile=/tmp/smoke.cjs --jsx=automatic
+ *   node /tmp/smoke.cjs
  */
 const mem = new Map<string, string>();
 (globalThis as unknown as { localStorage: unknown }).localStorage = {
@@ -22,18 +22,18 @@ import { EXERCISES } from '../src/data/exercises';
 import { renderFigure } from '../src/lib/render';
 import { sampleTimeline } from '../src/lib/pose';
 import { Library } from '../src/views/Library';
+import { Progress } from '../src/views/Progress';
+import { Programs } from '../src/views/Programs';
+import { Session } from '../src/views/Session';
 
-function render(label: string) {
-  const html = renderToString(createElement(StoreProvider, null, createElement(App)));
-  console.log(`✓ ${label} — ${html.length} caractères de HTML`);
+const KEY = 'gymos.v1';
+
+function render(label: string, node: React.ReactElement) {
+  const html = renderToString(createElement(StoreProvider, null, node));
+  console.log(`\u2713 ${label} — ${html.length} caractères de HTML`);
   return html;
 }
 
-// 1. Premier lancement : onboarding
-const a = render('onboarding (aucun profil)');
-if (!a.includes('IronPath')) throw new Error('Onboarding : marque absente');
-
-// 2. Profil complet -> séance du jour
 const profile = {
   name: 'Test',
   goal: 'seche' as const,
@@ -45,9 +45,19 @@ const profile = {
   startDate: todayISO(),
   cardio: true,
 };
-mem.set('ironpath.v2', JSON.stringify({ profile, program: buildProgram(profile), history: [], bodyweights: [], active: null }));
-const b = render('tableau de bord (profil sèche / débutant)');
-if (!b.includes('Aujourd’hui')) throw new Error('Vue du jour absente');
+
+// 1. Premier lancement : onboarding
+const a = render('onboarding (aucun profil)', createElement(App));
+if (!a.includes('GYM OS')) throw new Error('Onboarding : marque absente');
+
+// 2. Profil complet -> tableau de bord
+const program = buildProgram(profile);
+mem.set(
+  KEY,
+  JSON.stringify({ profile, programs: [program], activeProgramId: program.id, history: [], bodyweights: [], active: null }),
+);
+const b = render('tableau de bord (profil sèche / débutant)', createElement(App));
+if (!b.includes('Bonjour')) throw new Error('Tableau de bord absent — début du rendu : ' + b.slice(0, 700));
 
 // 3. Toutes les figures se rendent sans erreur, à 12 instants chacune
 let count = 0;
@@ -65,20 +75,54 @@ for (const ex of EXERCISES) {
     count++;
   }
 }
-console.log(`✓ ${EXERCISES.length} exercices rendus (${count} images) sans erreur`);
-// 4. Bibliothèque complète + séance en cours
-{ const h = renderToString(createElement(StoreProvider, null, createElement(Library)));
-  let n = 0; for (const m of h.matchAll(/<svg/g)) n++;
-  console.log(`\u2713 biblioth\u00e8que rendue \u2014 ${n} vignettes SVG, ${h.length} caract\u00e8res`); }
+console.log(`\u2713 ${EXERCISES.length} exercices rendus (${count} images) sans erreur`);
 
-{ const st = { profile, program: buildProgram(profile), history: [], bodyweights: [], active: null };
-  const found = findSessionForToday(st.program);
-  const s0 = found.session ?? st.program.sessions[0];
-  st.active = { date: todayISO(), sessionId: s0.id, startedAt: Date.now(), finished: false,
-    sets: Object.fromEntries(s0.items.map((it, i) => [it.exerciseId,
-      Array.from({ length: it.sets }, (_, k) => ({ reps: String(10 + k), weight: 20, done: i === 0 && k === 0 }))])) };
-  mem.set('ironpath.v2', JSON.stringify(st));
-  const h = renderToString(createElement(StoreProvider, null, createElement(App)));
-  console.log(`\u2713 s\u00e9ance en cours rendue \u2014 ${h.length} caract\u00e8res`); }
+// 4. Bibliothèque complète
+{
+  const h = renderToString(createElement(StoreProvider, null, createElement(Library)));
+  let n = 0;
+  for (const _m of h.matchAll(/<svg/g)) n++;
+  console.log(`\u2713 biblioth\u00e8que rendue — ${n} vignettes SVG, ${h.length} caractères`);
+}
+
+// 5. Programmes (CRUD)
+render('programmes', createElement(Programs));
+
+// 6. Suivi
+render('suivi', createElement(Progress));
+
+// 7. Séance en cours
+{
+  const found = findSessionForToday(program);
+  const s0 = found.session ?? program.sessions[0];
+  mem.set(
+    KEY,
+    JSON.stringify({
+      profile,
+      programs: [program],
+      activeProgramId: program.id,
+      history: [],
+      bodyweights: [],
+      active: {
+        date: todayISO(),
+        sessionId: s0.id,
+        startedAt: Date.now(),
+        finished: false,
+        sets: Object.fromEntries(
+          s0.items.map((it, i) => [
+            it.exerciseId,
+            Array.from({ length: it.sets }, (_, k) => ({
+              reps: 10 + k,
+              weight: 20,
+              done: i === 0 && k === 0,
+            })),
+          ]),
+        ),
+      },
+    }),
+  );
+  const h = renderToString(createElement(StoreProvider, null, createElement(Session, { onExit: () => undefined })));
+  console.log(`\u2713 s\u00e9ance en cours rendue — ${h.length} caractères`);
+}
 
 console.log('\nTous les tests de fum\u00e9e sont pass\u00e9s.');
