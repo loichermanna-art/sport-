@@ -1,0 +1,16 @@
+{
+  "name": "IronPath — Musculation guidée",
+  "short_name": "IronPath",
+  "description": "Planifie tes séances de musculation et apprends chaque mouvement avec des démonstrations animées.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#080b13",
+  "theme_color": "#080b13",
+  "orientation": "portrait",
+  "lang": "fr",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
